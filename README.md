@@ -70,9 +70,10 @@ It's the part that handles the commands from the simulation controller.
 - `send_event`: Sends simulation events (e.g. `PacketSent`, `PackedDropped`) to the simulation controller
 - `request_to_do_a_backflip`: icing on the cake that makes our drone unique.
 
-### Costumer support: (telegram)
+## Costumer support: 
+Telegram support:
 - Mr. Krab: @lilloLeo
-- Krusty Crap HeadChef: @NooXiii (we'll put some emails)
+- Krusty Crap HeadChef: @NooXiii 
 - Krusty Technicians: @olzhkkk @chenlei2003
 
 **PS**: Hopefully we will put our mails
