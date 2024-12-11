@@ -73,6 +73,6 @@ It's the part that handles the commands from the simulation controller.
 ### Costumer support: (telegram)
 - Mr. Krab: @lilloLeo
 - Krusty Crap HeadChef: @NooXiii (we'll put some emails)
-- Krusty Technicians: @olzhkkk https://t.me/chenlei2003
+- Krusty Technicians: @olzhkkk @chenlei2003
 
 **PS**: Hopefully we will put our mails
