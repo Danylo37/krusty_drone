@@ -42,6 +42,8 @@ impl Drone for KrustyCrapDrone {
     }
 
     fn run(&mut self) {
+        self.meme();
+
         loop {
             select_biased! {
                 recv(self.controller_recv) -> command => {
@@ -64,10 +66,6 @@ impl Drone for KrustyCrapDrone {
 
 impl KrustyCrapDrone {
     fn handle_packet(&mut self, packet: Packet) {
-        if packet.session_id == 360_360_360 {
-            Self::request_to_do_a_backflip();
-        }
-
         match packet.pack_type {
             PacketType::Nack(_) => self.handle_nack(packet),
             PacketType::Ack(_) => self.handle_ack(packet),
@@ -148,15 +146,6 @@ impl KrustyCrapDrone {
 
         // Create a new Fragment packet using the updated routing header, session ID and fragment
         let mut packet = Packet::new_fragment(routing_header.clone(), session_id, fragment.clone());
-
-        // 😇
-        if self.pdr == 0.777 {
-            self.pdr = 0.0;
-        }
-        // 😈
-        if self.pdr == 0.666 {
-            self.pdr = 1.0;
-        }
 
         // Simulate packet drop based on the PDR
         // If the random number is less than PDR, send the 'PacketDropped' event to the simulation controller
@@ -369,6 +358,21 @@ impl KrustyCrapDrone {
                     eprintln!("Error sending 'ControllerShortcut' event to controller");
                 }
             }
+        }
+    }
+
+    fn meme(&mut self) {
+        // 😇
+        if self.pdr == 0.777 {
+            self.pdr = 0.0;
+        }
+        // 😈
+        if self.pdr == 0.666 {
+            self.pdr = 1.0;
+        }
+
+        if self.pdr == 0.360_360_360 {
+            Self::request_to_do_a_backflip();
         }
     }
 
