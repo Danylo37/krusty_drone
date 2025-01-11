@@ -56,13 +56,13 @@ impl Drone for KrustyCrapDrone {
             select_biased! {
                 recv(self.controller_recv) -> command => {
                     if let Ok(command) = command {
-                        debug!("Received controller command: {:?}", command);
+                        debug!("Drone {} received controller command: {:?}", self.id, command);
                         self.handle_command(command);
                     }
                 }
                 recv(self.packet_recv) -> packet => {
                     if let Ok(packet) = packet {
-                        debug!("Received packet: {:?}", packet);
+                        debug!("Drone {} received packet: {:?}", self.id, packet);
                         self.handle_packet(packet);
                     }
                 },
@@ -79,8 +79,6 @@ impl Drone for KrustyCrapDrone {
 impl KrustyCrapDrone {
     /// ###### Routes incoming packets to appropriate handlers based on packet type
     fn handle_packet(&mut self, packet: Packet) {
-        debug!("Handling packet of type: {:?}", packet.pack_type);
-
         match packet.pack_type {
             PacketType::Nack(_) => self.handle_nack(packet),
             PacketType::Ack(_) => self.handle_ack(packet),
@@ -92,23 +90,21 @@ impl KrustyCrapDrone {
 
     /// ###### Processes controller commands for drone configuration
     fn handle_command(&mut self, command: DroneCommand) {
-        debug!("Handling command: {:?}", command);
-
         match command {
             DroneCommand::AddSender(id, sender) => {
-                info!("Adding sender for node {}", id);
+                info!("Drone {}: Adding sender for node {}", self.id, id);
                 self.packet_send.insert(id, sender);
             },
             DroneCommand::RemoveSender(id) => {
-                info!("Removing sender for node {}", id);
+                info!("Drone {}: Removing sender for node {}", self.id, id);
                 self.packet_send.remove(&id);
             },
             DroneCommand::SetPacketDropRate(pdr) => {
-                info!("Updating packet drop rate from {} to {}", self.pdr, pdr);
+                info!("Drone {}: Updating packet drop rate from {} to {}", self.id, self.pdr, pdr);
                 self.pdr = pdr;
             },
             DroneCommand::Crash => {
-                warn!("Received crash command for drone {}", self.id);
+                warn!("Drone {} received crash command", self.id);
                 self.crashing_behavior = true;
             }
         }
@@ -116,13 +112,13 @@ impl KrustyCrapDrone {
 
     /// ###### Forwards NACK packets to the next hop
     fn handle_nack(&mut self, packet: Packet) {
-        debug!("Forwarding NACK packet: {:?}", packet);
+        debug!("Drone {}: Forwarding NACK packet", self.id);
         self.send_to_next_hop(packet);
     }
 
     /// ###### Forwards ACK packets to the next hop
     fn handle_ack(&mut self, packet: Packet) {
-        debug!("Forwarding ACK packet: {:?}", packet);
+        debug!("Drone {}: Forwarding ACK packet", self.id);
         self.send_to_next_hop(packet);
     }
 
@@ -133,7 +129,7 @@ impl KrustyCrapDrone {
         routing_header: SourceRoutingHeader,
         session_id: u64
     ) {
-        debug!("Handling fragment {} for session {}", fragment.fragment_index, session_id);
+        debug!("Drone {}: Handling fragment {} for session {}", self.id, fragment.fragment_index, session_id);
 
         // Check if the drone is in a crashing state.
         // If so, send a Nack 'ErrorInRouting' with 'self.id'.
@@ -146,14 +142,14 @@ impl KrustyCrapDrone {
         // Retrieve the current hop from the routing header.
         // If it doesn't exist, send a Nack 'UnexpectedRecipient' with 'self.id'.
         let Some(current_hop_id) = routing_header.current_hop() else {
-            error!("No current hop in routing header, sending UnexpectedRecipient NACK");
+            error!("Drone {}: No current hop in routing header, sending UnexpectedRecipient NACK", self.id);
             self.send_nack(NackType::UnexpectedRecipient(self.id), fragment.fragment_index, routing_header, session_id);
             return;
         };
 
         // If the current hop isn't the drone's ID, send a Nack 'UnexpectedRecipient' with 'self.id'.
         if self.id != current_hop_id {
-            error!("Unexpected recipient (got {}, expected {}), sending NACK", current_hop_id, self.id);
+            error!("Drone {}: Unexpected recipient ({}), sending NACK", self.id, current_hop_id);
             self.send_nack(NackType::UnexpectedRecipient(self.id), fragment.fragment_index, routing_header, session_id);
             return;
         }
@@ -161,7 +157,7 @@ impl KrustyCrapDrone {
         // Retrieve the next hop from the routing header.
         // If it doesn't exist, send a Nack 'DestinationIsDrone'.
         let Some(next_hop_id) = routing_header.next_hop() else {
-            error!("No next hop in routing header, sending DestinationIsDrone NACK");
+            error!("Drone {}: No next hop in routing header, sending DestinationIsDrone NACK", self.id);
             self.send_nack(NackType::DestinationIsDrone, fragment.fragment_index, routing_header, session_id);
             return;
         };
@@ -169,7 +165,7 @@ impl KrustyCrapDrone {
         // Attempt to find the sender for the next hop.
         // If the sender isn't found, send a Nack 'ErrorInRouting' with next_hop_id.
         let Some(sender) = self.packet_send.get(&next_hop_id) else {
-            error!("No sender found for next hop {}, sending ErrorInRouting NACK", next_hop_id);
+            error!("Drone {}: No sender found for next hop {}, sending ErrorInRouting NACK", self.id, next_hop_id);
             self.send_nack(NackType::ErrorInRouting(next_hop_id), fragment.fragment_index, routing_header, session_id);
             return;
         };
@@ -181,7 +177,7 @@ impl KrustyCrapDrone {
         // If the random number is less than PDR, send the 'PacketDropped' event to the simulation controller.
         // And send a Nack 'Dropped'.
         if random_range(0.0..1.0) <= self.pdr {
-            warn!("Packet dropped due to PDR ({})", self.pdr);
+            warn!("Drone {}: Packet dropped due to PDR ({})", self.id, self.pdr);
             self.send_event(DroneEvent::PacketDropped(packet));
             self.send_nack(NackType::Dropped, fragment.fragment_index, routing_header, session_id);
             return;
@@ -192,16 +188,16 @@ impl KrustyCrapDrone {
 
         // Attempt to send the updated fragment packet to the next hop.
         if sender.send(packet.clone()).is_err() {
-            error!("Failed to send packet to next hop {}", next_hop_id);
+            error!("Drone {}: Failed to send packet to next hop {}", self.id, next_hop_id);
         } else {
-            info!("Successfully forwarded fragment {} to next hop {}", fragment.fragment_index, next_hop_id);
+            info!("Drone {}: Successfully forwarded fragment {} to next hop {}", self.id, fragment.fragment_index, next_hop_id);
             self.send_event(DroneEvent::PacketSent(packet));
         }
     }
 
     /// ###### Sends NACK packet to the previous hop
     fn send_nack(&self, nack_type: NackType, fragment_index: u64, mut routing_header: SourceRoutingHeader, session_id: u64) {
-        debug!("Sending NACK for fragment {} with type {:?}", fragment_index, nack_type);
+        debug!("Drone {}: Sending NACK for fragment {} with type {:?}", self.id, fragment_index, nack_type);
 
         let nack = Nack {
             fragment_index,
@@ -221,7 +217,7 @@ impl KrustyCrapDrone {
 
     /// ###### Processes flood requests and forwards to neighbors
     fn handle_flood_request(&mut self, mut flood_request: FloodRequest, session_id: u64) {
-        debug!("Handling flood request {} from initiator {}", flood_request.flood_id, flood_request.initiator_id);
+        debug!("Drone {}: Handling flood request {} from initiator {}", self.id, flood_request.flood_id, flood_request.initiator_id);
 
         // Check if the drone is in a crashing state.
         // If so, just return.
@@ -238,7 +234,7 @@ impl KrustyCrapDrone {
 
         // Check if the flood ID has already been received from this flood initiator.
         if self.floods.get(&initiator_id).map_or(false, |ids| ids.contains(&flood_id)) {
-            info!("Flood {} from initiator {} already processed, sending response", flood_id, initiator_id);
+            info!("Drone {}: Flood {} from initiator {} already processed, sending response", self.id, flood_id, initiator_id);
             // Generate and send the flood response.
             let response = flood_request.generate_response(session_id);
             self.send_to_next_hop(response);
@@ -255,7 +251,7 @@ impl KrustyCrapDrone {
         // Check if there's a previous node (sender) in the flood path.
         // If the sender isn't found, print an error.
         let Some(sender_id) = self.get_prev_node_id(&flood_request.path_trace) else {
-            error!("No previous node found in flood path");
+            error!("Drone {}: No previous node found in flood path", self.id);
             return;
         };
 
@@ -264,11 +260,11 @@ impl KrustyCrapDrone {
 
         // If there are neighbors, forward the flood request to them
         if !neighbors.is_empty() {
-            info!("Forwarding flood request");
+            info!("Drone {}: Forwarding flood request", self.id);
             self.forward_flood_request(neighbors, flood_request, session_id);
         } else {
             // If no neighbors, generate and send a response instead.
-            info!("No neighbors to forward flood request to, sending response");
+            info!("Drone {}: No neighbors to forward flood request to, sending response", self.id);
             let response = flood_request.generate_response(session_id);
             self.send_to_next_hop(response);
         }
@@ -276,10 +272,10 @@ impl KrustyCrapDrone {
 
     /// ###### Retrieves the previous node ID from the path trace
     fn get_prev_node_id(&self, path_trace: &Vec<(NodeId, NodeType)>) -> Option<NodeId> {
-        debug!("Getting previous node ID from path trace: {:?}", path_trace);
+        debug!("Drone {}: Getting previous node ID from path trace: {:?}", self.id, path_trace);
         if path_trace.len() > 1 {
             let prev_id = path_trace[path_trace.len() - 2].0;
-            debug!("Previous node ID found: {}", prev_id);
+            debug!("Drone {}: Previous node ID found: {}", self.id, prev_id);
             return Some(prev_id);
         }
         None
@@ -308,9 +304,9 @@ impl KrustyCrapDrone {
 
             // Attempt to forward the flood request to the neighbor.
             if sender.send(packet.clone()).is_err() {
-                error!("Failed to forward flood request");
+                error!("Drone {}: Failed to forward flood request", self.id);
             } else {
-                debug!("Flood request forwarded successfully");
+                debug!("Drone {}: Flood request forwarded successfully", self.id);
                 self.send_event(DroneEvent::PacketSent(packet));
             }
         }
@@ -318,34 +314,34 @@ impl KrustyCrapDrone {
 
     /// ###### Forwards FloodResponse packets to the next hop
     fn handle_flood_response(&mut self, packet: Packet) {
-        debug!("Forwarding flood response: {:?}", packet);
+        debug!("Drone {}: Forwarding flood response: {:?}", self.id, packet);
         self.send_to_next_hop(packet);
     }
 
     /// ###### Sends packet to the next hop
     fn send_to_next_hop(&self, mut packet: Packet) {
-        debug!("Sending packet to next hop: {:?}", packet);
+        debug!("Drone {}: Sending packet to next hop: {:?}", self.id, packet);
 
         // Attempt to find the sender for the next hop
         let sender = self.get_sender_of_next(packet.routing_header.clone());
 
         // Increment the hop index in the routing header.
         packet.routing_header.increase_hop_index();
-        debug!("Increased hop index in routing header");
+        debug!("Drone {}: Increased hop index in routing header", self.id);
 
         // Send the packet to the next hop if the sender is found.
         // If the sender is not found, send the packet through the controller.
         match sender {
             None => {
-                warn!("Sending packet through controller");
+                warn!("Drone {}: Sending packet through controller", self.id);
                 self.send_event(DroneEvent::ControllerShortcut(packet));
             }
             Some(sender) => {
                 if sender.send(packet.clone()).is_err() {
-                    error!("Failed to send packet to next hop, sending packet through controller");
+                    error!("Drone {}: Failed to send packet to next hop, sending packet through controller", self.id);
                     self.send_event(DroneEvent::ControllerShortcut(packet));
                 } else {
-                    info!("Successfully sent packet to next hop");
+                    info!("Drone {}: Successfully sent packet to next hop", self.id);
                     self.send_event(DroneEvent::PacketSent(packet));
                 }
             }
@@ -354,21 +350,21 @@ impl KrustyCrapDrone {
 
     /// ###### Retrieves the sender for the next hop from the routing header
     fn get_sender_of_next(&self, routing_header: SourceRoutingHeader) -> Option<&Sender<Packet>> {
-        debug!("Getting sender for next hop from routing header");
+        debug!("Drone {}: Getting sender for next hop from routing header", self.id);
 
         // Attempt to retrieve the next hop ID from the routing header.
         // If it is missing, return `None` as there is no valid destination to send the packet to.
         let Some(next_hop_id) = routing_header.next_hop() else {
-            error!("No next hop found in routing header");
+            error!("Drone {}: No next hop found in routing header", self.id);
             return None;
         };
 
         // Attempt to retrieve the sender for the next hop ID.
         let sender = self.packet_send.get(&next_hop_id);
         if sender.is_none() {
-            error!("No sender found for next hop {}", next_hop_id);
+            error!("Drone {}: No sender found for next hop {}", self.id, next_hop_id);
         } else {
-            debug!("Found sender for next hop {}", next_hop_id);
+            debug!("Drone {}: Found sender for next hop {}", self.id, next_hop_id);
         }
         sender
     }
@@ -378,23 +374,23 @@ impl KrustyCrapDrone {
         match event {
             DroneEvent::PacketSent(packet) => {
                 if self.controller_send.send(DroneEvent::PacketSent(packet.clone())).is_err() {
-                    error!("Failed to send PacketSent event to controller");
+                    error!("Drone {}: Failed to send PacketSent event to controller", self.id);
                 } else {
-                    info!("Packet with the PacketSent event sent successfully: {:?}", packet);
+                    info!("Drone {}: Packet with the PacketSent event sent successfully: {:?}", self.id, packet);
                 }
             }
             DroneEvent::PacketDropped(packet) => {
                 if self.controller_send.send(DroneEvent::PacketDropped(packet.clone())).is_err() {
-                    error!("Failed to send PacketDropped event to controller");
+                    error!("Drone {}: Failed to send PacketDropped event to controller", self.id);
                 } else {
-                    warn!("Packet with the PacketDropped event sent successfully: {:?}", packet);
+                    warn!("Drone {}: Packet with the PacketDropped event sent successfully: {:?}", self.id, packet);
                 }
             }
             DroneEvent::ControllerShortcut(packet) => {
                 if self.controller_send.send(DroneEvent::ControllerShortcut(packet.clone())).is_err() {
-                    error!("Failed to send ControllerShortcut event to controller");
+                    error!("Drone {}: Failed to send ControllerShortcut event to controller", self.id);
                 } else {
-                    debug!("Packet sent through controller shortcut: {:?}", packet);
+                    debug!("Drone {}: Packet sent through controller shortcut: {:?}", self.id, packet);
                 }
             }
         }
@@ -402,17 +398,17 @@ impl KrustyCrapDrone {
 
     /// ###### Checks for special PDR values and triggers ester eggs
     fn ester_egg(&mut self) {
-        debug!("Checking special PDR values...");
+        debug!("Drone {}: Checking special PDR values...", self.id);
         if self.pdr == 0.777 {
-            info!("Angel mode activated 😇");
+            info!("Drone {}: Angel mode activated 😇", self.id);
             self.pdr = 0.0;
         }
         if self.pdr == 0.666 {
-            warn!("Devil mode activated 😈");
+            warn!("Drone {}: Devil mode activated 😈", self.id);
             self.pdr = 1.0;
         }
         if self.pdr == 0.360_360_360 {
-            info!("Attempting backflip...");
+            info!("Drone {}: Attempting backflip...", self.id);
             Self::request_to_do_a_backflip();
         }
     }
