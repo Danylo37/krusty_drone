@@ -376,14 +376,14 @@ impl KrustyCrapDrone {
                 if self.controller_send.send(DroneEvent::PacketSent(packet.clone())).is_err() {
                     error!("Drone {}: Failed to send PacketSent event to controller", self.id);
                 } else {
-                    info!("Drone {}: Packet with the PacketSent event sent successfully: {:?}", self.id, packet);
+                    info!("Drone {}: PacketSent event sent successfully: {:?}", self.id, packet);
                 }
             }
             DroneEvent::PacketDropped(packet) => {
                 if self.controller_send.send(DroneEvent::PacketDropped(packet.clone())).is_err() {
                     error!("Drone {}: Failed to send PacketDropped event to controller", self.id);
                 } else {
-                    warn!("Drone {}: Packet with the PacketDropped event sent successfully: {:?}", self.id, packet);
+                    warn!("Drone {}: PacketDropped event sent successfully: {:?}", self.id, packet);
                 }
             }
             DroneEvent::ControllerShortcut(packet) => {
