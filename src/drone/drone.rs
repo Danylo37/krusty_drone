@@ -104,21 +104,29 @@ impl KrustyCrapDrone {
                 self.pdr = pdr;
             },
             DroneCommand::Crash => {
-                warn!("Drone {} received crash command", self.id);
+                warn!("Drone {}: Crash behavior is on", self.id);
                 self.crashing_behavior = true;
             }
         }
     }
 
     /// ###### Forwards NACK packets to the next hop
-    fn handle_nack(&mut self, packet: Packet) {
+    fn handle_nack(&mut self, mut packet: Packet) {
         debug!("Drone {}: Forwarding NACK packet", self.id);
+
+        // Increment the hop index in the routing header.
+        packet.routing_header.increase_hop_index();
+
         self.send_to_next_hop(packet);
     }
 
     /// ###### Forwards ACK packets to the next hop
-    fn handle_ack(&mut self, packet: Packet) {
+    fn handle_ack(&mut self, mut packet: Packet) {
         debug!("Drone {}: Forwarding ACK packet", self.id);
+
+        // Increment the hop index in the routing header.
+        packet.routing_header.increase_hop_index();
+
         self.send_to_next_hop(packet);
     }
 
@@ -204,12 +212,19 @@ impl KrustyCrapDrone {
             nack_type,
         };
 
-        // Truncate the hops in the routing header up to the current hop index + 1, to include current hop.
-        routing_header.hops.truncate(routing_header.hop_index + 1);
+        let current_hop = if self.crashing_behavior {
+            0
+        } else {
+            1
+        };
+
+        // Truncate the hops in the routing header up to the current hop index + 1 or 0,
+        // to include or not include current hop.
+        routing_header.hops.truncate(routing_header.hop_index + current_hop);
         // Reverse the routing header to indicate the Nack should go backward in the route
         routing_header.hops.reverse();
-        // Reset the hop index to 0
-        routing_header.hop_index = 0;
+        // Reset the hop index to 1 or 0
+        routing_header.hop_index = current_hop;
 
         let nack_packet = Packet::new_nack(routing_header.clone(), session_id, nack);
         self.send_to_next_hop(nack_packet);
@@ -236,7 +251,11 @@ impl KrustyCrapDrone {
         if self.floods.get(&initiator_id).map_or(false, |ids| ids.contains(&flood_id)) {
             info!("Drone {}: Flood {} from initiator {} already processed, sending response", self.id, flood_id, initiator_id);
             // Generate and send the flood response.
-            let response = flood_request.generate_response(session_id);
+            let mut response = flood_request.generate_response(session_id);
+
+            // Increment the hop index in the routing header.
+            response.routing_header.increase_hop_index();
+
             self.send_to_next_hop(response);
             return;
         }
@@ -265,7 +284,11 @@ impl KrustyCrapDrone {
         } else {
             // If no neighbors, generate and send a response instead.
             info!("Drone {}: No neighbors to forward flood request to, sending response", self.id);
-            let response = flood_request.generate_response(session_id);
+            let mut response = flood_request.generate_response(session_id);
+
+            // Increment the hop index in the routing header.
+            response.routing_header.increase_hop_index();
+
             self.send_to_next_hop(response);
         }
     }
@@ -313,21 +336,21 @@ impl KrustyCrapDrone {
     }
 
     /// ###### Forwards FloodResponse packets to the next hop
-    fn handle_flood_response(&mut self, packet: Packet) {
+    fn handle_flood_response(&mut self, mut packet: Packet) {
         debug!("Drone {}: Forwarding flood response: {:?}", self.id, packet);
+
+        // Increment the hop index in the routing header.
+        packet.routing_header.increase_hop_index();
+
         self.send_to_next_hop(packet);
     }
 
     /// ###### Sends packet to the next hop
-    fn send_to_next_hop(&self, mut packet: Packet) {
+    fn send_to_next_hop(&self, packet: Packet) {
         debug!("Drone {}: Sending packet to next hop: {:?}", self.id, packet);
 
         // Attempt to find the sender for the next hop
         let sender = self.get_sender_of_next(packet.routing_header.clone());
-
-        // Increment the hop index in the routing header.
-        packet.routing_header.increase_hop_index();
-        debug!("Drone {}: Increased hop index in routing header", self.id);
 
         // Send the packet to the next hop if the sender is found.
         // If the sender is not found, send the packet through the controller.
@@ -354,7 +377,7 @@ impl KrustyCrapDrone {
 
         // Attempt to retrieve the next hop ID from the routing header.
         // If it is missing, return `None` as there is no valid destination to send the packet to.
-        let Some(next_hop_id) = routing_header.next_hop() else {
+        let Some(next_hop_id) = routing_header.current_hop() else {
             error!("Drone {}: No next hop found in routing header", self.id);
             return None;
         };
